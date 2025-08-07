@@ -33,6 +33,7 @@ functions in [./tests/adapters.py](./tests/adapters.py).
 ### Download data
 Download the TinyStories data and a subsample of OpenWebText
 
+**Unix/Linux/macOS:**
 ``` sh
 mkdir -p data
 cd data
@@ -44,6 +45,24 @@ wget https://huggingface.co/datasets/stanford-cs336/owt-sample/resolve/main/owt_
 gunzip owt_train.txt.gz
 wget https://huggingface.co/datasets/stanford-cs336/owt-sample/resolve/main/owt_valid.txt.gz
 gunzip owt_valid.txt.gz
+
+cd ..
+```
+
+**Windows (PowerShell):**
+``` powershell
+New-Item -ItemType Directory -Path data -Force
+cd data
+
+# Download TinyStories data
+Invoke-WebRequest -Uri "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStoriesV2-GPT4-train.txt" -OutFile "TinyStoriesV2-GPT4-train.txt"
+Invoke-WebRequest -Uri "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStoriesV2-GPT4-valid.txt" -OutFile "TinyStoriesV2-GPT4-valid.txt"
+
+# Download and extract OpenWebText data
+Invoke-WebRequest -Uri "https://huggingface.co/datasets/stanford-cs336/owt-sample/resolve/main/owt_train.txt.gz" -OutFile "owt_train.txt.gz"
+python -c "import gzip; import shutil; shutil.copyfileobj(gzip.open('owt_train.txt.gz', 'rb'), open('owt_train.txt', 'wb'))"
+Invoke-WebRequest -Uri "https://huggingface.co/datasets/stanford-cs336/owt-sample/resolve/main/owt_valid.txt.gz" -OutFile "owt_valid.txt.gz"
+python -c "import gzip; import shutil; shutil.copyfileobj(gzip.open('owt_valid.txt.gz', 'rb'), open('owt_valid.txt', 'wb'))"
 
 cd ..
 ```
