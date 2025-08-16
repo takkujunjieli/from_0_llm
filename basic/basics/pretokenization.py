@@ -187,20 +187,22 @@ class BPETokenizer:
             # Store as bytes objects, not integers
             word_splits[word] = [bytes([b]) for b in word.encode('utf-8')]
         
-        # Step 4: Iteratively merge most frequent pairs
+        # Step 4: Iteratively merge most frequent pairs (optimized with incremental updates)
         current_vocab_size = len(self.vocab)
         
+        # Build initial pair counts index
+        pair_counts = self._build_initial_pair_counts(word_splits, word_freqs)
+        print(f"Initial pair count index built with {len(pair_counts)} unique pairs")
+        
         while current_vocab_size < vocab_size:
-            # Count all pairs
-            pairs = self._get_pairs(word_splits, word_freqs)
-            
-            if not pairs:
+            if not pair_counts:
                 break
                 
-            # Find most frequent pair
-            best_pair = max(pairs, key=pairs.get)
+            # Find most frequent pair from the index
+            best_pair = max(pair_counts, key=pair_counts.get)
+            best_count = pair_counts[best_pair]
             
-            if pairs[best_pair] < min_frequency:
+            if best_count < min_frequency:
                 break
                 
             # Merge the best pair
@@ -215,13 +217,15 @@ class BPETokenizer:
             self.merges.append(best_pair)
             self.merge_rules[best_pair] = merged_token
             
-            # Update word splits
-            word_splits = self._merge_vocab(best_pair, word_splits)
+            # Incrementally update word splits and pair counts
+            word_splits, pair_counts = self._merge_vocab_incremental(
+                best_pair, word_splits, word_freqs, pair_counts, merged_token
+            )
             
             current_vocab_size += 1
             
             if current_vocab_size % 1000 == 0:
-                print(f"Vocab size: {current_vocab_size}")
+                print(f"Vocab size: {current_vocab_size}, Active pairs: {len(pair_counts)}")
         
         print(f"Training complete. Final vocab size: {len(self.vocab)}")
         
@@ -272,6 +276,94 @@ class BPETokenizer:
                 pairs[pair] += freq
                 
         return dict(pairs)
+    
+    def _build_initial_pair_counts(self, word_splits: Dict[str, list], word_freqs: Dict[str, int]) -> Dict[tuple, int]:
+        """Build initial index of all pair counts."""
+        return self._get_pairs(word_splits, word_freqs)
+    
+    def _merge_vocab_incremental(self, best_pair: tuple, word_splits: Dict[str, list], 
+                                word_freqs: Dict[str, int], pair_counts: Dict[tuple, int], 
+                                merged_token: bytes) -> tuple[Dict[str, list], Dict[tuple, int]]:
+        """
+        Apply merge rule and incrementally update pair counts.
+        
+        This is much faster than recalculating all pairs from scratch.
+        """
+        new_word_splits = {}
+        new_pair_counts = pair_counts.copy()
+        
+        # Remove the merged pair from counts
+        if best_pair in new_pair_counts:
+            del new_pair_counts[best_pair]
+        
+        for word in word_splits:
+            symbols = word_splits[word]
+            new_symbols = []
+            i = 0
+            word_changed = False
+            
+            # Track which pairs are removed and added for this word
+            pairs_to_remove = []
+            pairs_to_add = []
+            
+            while i < len(symbols):
+                if (i < len(symbols) - 1 and 
+                    symbols[i] == best_pair[0] and 
+                    symbols[i + 1] == best_pair[1]):
+                    
+                    word_changed = True
+                    
+                    # Record pairs that will be removed
+                    if i > 0:
+                        # Remove pair to the left of the merge
+                        left_pair = (symbols[i-1], symbols[i])
+                        pairs_to_remove.append(left_pair)
+                    
+                    if i + 2 < len(symbols):
+                        # Remove pair to the right of the merge
+                        right_pair = (symbols[i+1], symbols[i+2])
+                        pairs_to_remove.append(right_pair)
+                    
+                    # Add the merged token
+                    new_symbols.append(merged_token)
+                    
+                    # Record new pairs that will be added
+                    if i > 0:
+                        # Add new pair to the left
+                        new_left_pair = (symbols[i-1], merged_token)
+                        pairs_to_add.append(new_left_pair)
+                    
+                    if i + 2 < len(symbols):
+                        # Add new pair to the right
+                        new_right_pair = (merged_token, symbols[i+2])
+                        pairs_to_add.append(new_right_pair)
+                    
+                    i += 2  # Skip both merged symbols
+                else:
+                    new_symbols.append(symbols[i])
+                    i += 1
+            
+            new_word_splits[word] = new_symbols
+            
+            # Update pair counts for this word's frequency
+            if word_changed:
+                freq = word_freqs[word]
+                
+                # Decrease counts for removed pairs
+                for pair in pairs_to_remove:
+                    if pair in new_pair_counts:
+                        new_pair_counts[pair] -= freq
+                        if new_pair_counts[pair] <= 0:
+                            del new_pair_counts[pair]
+                
+                # Increase counts for added pairs
+                for pair in pairs_to_add:
+                    if pair in new_pair_counts:
+                        new_pair_counts[pair] += freq
+                    else:
+                        new_pair_counts[pair] = freq
+        
+        return new_word_splits, new_pair_counts
     
     def _merge_vocab(self, pair: tuple, word_splits: Dict[str, list]) -> Dict[str, list]:
         """Apply merge rule to all word splits."""
